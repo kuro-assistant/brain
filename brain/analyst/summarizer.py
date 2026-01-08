@@ -8,7 +8,7 @@ class SemanticAnalyst:
     def __init__(self):
         pass
 
-    def synthesize(self, plan_results: list) -> str:
+    def synthesize(self, plan_results: list) -> (str, bool):
         """
         Synthesizes facts from RAG, Memory, and System Tools.
         Separates 'Identity' from 'External Facts' to avoid hallucination.
@@ -44,4 +44,13 @@ class SemanticAnalyst:
             analysis.append("\n### SYSTEM EXECUTION")
             analysis.extend(system_status)
             
-        return "\n".join(analysis) if analysis else "No significant context found."
+        analysis_str = "\n".join(analysis) if analysis else "No significant context found."
+        
+        # Phase 3C: Basic Insufficiency Detection
+        # (In a real implementation, this would be a small LLM call or regex heuristic)
+        needs_more_data = False
+        if not external_facts and any(r["type"] == "rag" for r in plan_results):
+            # We expected RAG but got nothing
+            needs_more_data = True
+            
+        return analysis_str, needs_more_data

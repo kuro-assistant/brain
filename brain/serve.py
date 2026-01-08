@@ -39,12 +39,27 @@ class BrainOrchestrator(kuro_pb2_grpc.BrainServiceServicer):
             # Layer 1: Intent Routing
             intent = self.router.route(user_msg.text)
             
-            # Layer 2-3: Task Execution (Planner calls VM 2, VM 3, and Client)
-            print(f"Executing plan for intent: {intent}")
-            plan_results = self.planner.execute_plan(intent, user_msg)
+            # Phase 3C: Iterative Reasoning Loop
+            all_results = []
+            max_iterations = 3
+            current_iteration = 0
             
-            # Layer 4: Semantic Analysis
-            analysis = self.analyst.synthesize(plan_results)
+            feedback = None
+            while current_iteration < max_iterations:
+                print(f"Executing reasoning step {current_iteration + 1} for intent: {intent}")
+                plan_results = self.planner.execute_plan(intent, user_msg, feedback=feedback)
+                all_results.extend(plan_results)
+                
+                # Layer 4: Semantic Analysis
+                analysis, needs_more_data = self.analyst.synthesize(all_results)
+                
+                if not needs_more_data:
+                    break
+                
+                feedback = "Initial search returned no high-confidence results."
+                print(f"Analyst detected gaps ({feedback}). Re-planning...")
+                current_iteration += 1
+                # Optional: Feed back the gaps to the planner in future updates
             
             # Layer 4.5: Memory Admission (Decide what to save in VM 3)
             proposals = self.admission.evaluate(user_msg, analysis)
@@ -52,7 +67,7 @@ class BrainOrchestrator(kuro_pb2_grpc.BrainServiceServicer):
                 self.memory_stub.ProposeMemory(prop)
                 
             # Layer 5: Persona Generation
-            final_text = self.persona.generate(analysis, plan_results[1]["data"] if len(plan_results) > 1 else kuro_pb2.ContextResponse(), user_msg)
+            final_text = self.persona.generate(analysis, all_results[1]["data"] if len(all_results) > 1 else kuro_pb2.ContextResponse(), user_msg)
             
             yield kuro_pb2.BrainResponse(
                 text=final_text,

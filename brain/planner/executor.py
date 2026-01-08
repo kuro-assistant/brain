@@ -43,8 +43,20 @@ class DAGExecutor:
             current_id = queue.popleft()
             step = steps_map[current_id]
             
-            print(f"Planner: Executing step '{current_id}' - {step.description}")
-            
+            # 3C: Check for conditional execution
+            if step.intent.HasField("condition"):
+                # Basic condition evaluation (e.g., "results.STEP_01.success == True")
+                # For this implementation, we check if the required context key exists and is truthy
+                cond = step.intent.condition
+                if not self._evaluate_condition(cond, completed_steps):
+                    print(f"Planner: Skipping step '{current_id}' based on condition: {cond}")
+                    completed_steps[current_id] = {"success": True, "skipped": True}
+                    for neighbor in adj[current_id]:
+                        in_degree[neighbor] -= 1
+                        if in_degree[neighbor] == 0:
+                            queue.append(neighbor)
+                    continue
+
             # Execute step with retries (3A.2)
             attempts = 0
             success = False
@@ -71,6 +83,16 @@ class DAGExecutor:
                 break
                 
         return results
+
+    def _evaluate_condition(self, condition_str, context):
+        """
+        Evaluates a simple boolean condition based on previous step results.
+        Example: 'STEP_01.success'
+        """
+        for sid in context:
+            if sid in condition_str:
+                return context[sid].get("success", False)
+        return True
 
     def _dispatch_step(self, step: kuro_pb2.PlannerStep, context_data: dict):
         """
@@ -109,9 +131,10 @@ class TaskPlanner:
         self.validator = DAGValidator()
         self.llama_url = "http://localhost:8080/completion"
 
-    def execute_plan(self, intent, user_msg):
-        # 3A.1: Adaptive Planning (LLM-driven)
-        prompt = SYSTEM_PLANNER_PROMPT.format(user_text=user_msg.text)
+    def execute_plan(self, intent, user_msg, feedback=None):
+        # 3A.1/3C: Adaptive Planning (LLM-driven)
+        context_str = f"\n[SUPPLEMENTARY CONTEXT]\nPrevious attempts were insufficient: {feedback}" if feedback else ""
+        prompt = SYSTEM_PLANNER_PROMPT.format(user_text=user_msg.text) + context_str
         
         try:
             # Call llama.cpp API
