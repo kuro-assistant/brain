@@ -136,7 +136,8 @@ class TaskPlanner:
     def __init__(self, memory_stub, rag_stub, client_stub, ops_stub):
         self.executor = DAGExecutor(memory_stub, rag_stub, client_stub, ops_stub)
         self.validator = DAGValidator()
-        self.llama_url = "http://localhost:8080/completion"
+        self.llm_url = "http://localhost:11434/api/generate"
+        self.model = "phi3"
 
     def execute_plan(self, intent, user_msg, feedback=None):
         # 3A.1/3C: Adaptive Planning (LLM-driven)
@@ -144,14 +145,17 @@ class TaskPlanner:
         prompt = SYSTEM_PLANNER_PROMPT.format(user_text=user_msg.text) + context_str
         
         try:
-            # Call llama.cpp API
-            response = requests.post(self.llama_url, json={
+            # Call Ollama API
+            response = requests.post(self.llm_url, json={
+                "model": self.model,
                 "prompt": prompt,
-                "n_predict": 512,
-                "temperature": 0.2,
-                "stop": ["\n\n"]
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "stop": ["\n\n", "```"]
+                }
             })
-            raw_content = response.json()["content"]
+            raw_content = response.json()["response"]
             plan_json = json.loads(raw_content)
             
             # Map JSON to Protobuf DAG

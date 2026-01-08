@@ -28,7 +28,12 @@ class SemanticAnalyst:
                 for summary in data.memory_summaries:
                     identity_context.append(f"- {summary}")
             elif r_type == "tool":
-                system_status.append(f"- Action: {data.output if data.success else f'Failed: {data.error}'}")
+                if data.success:
+                    system_status.append(f"- Action: {data.output}")
+                else:
+                    system_status.append(f"- Action FAILED: {data.error}")
+            elif r_type == "error":
+                system_status.append(f"- System ERROR: {data}")
 
         # Constructing the high-density analysis for Layer 5
         analysis = []
