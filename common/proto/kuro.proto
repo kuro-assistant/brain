@@ -63,6 +63,18 @@ message ActionIntent {
   string action_id = 1;
   google.protobuf.Struct params = 2;
   bool requires_confirmation = 3;
+  repeated string depends_on = 4; // IDs of steps that must complete first
+}
+
+message PlannerStep {
+  string step_id = 1;
+  ActionIntent intent = 2;
+  string description = 3;
+}
+
+message PlannerDAG {
+  repeated PlannerStep steps = 1;
+  string goal = 2;
 }
 
 message MemoryProposal {
