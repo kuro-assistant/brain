@@ -51,7 +51,7 @@ class SemanticAnalyst:
             analysis.append("\n### SYSTEM EXECUTION")
             analysis.extend(system_status)
             
-        analysis_str = "\n".join(analysis) if analysis else "No significant context found."
+        analysis_str = "\n".join(analysis) if analysis else "System idle. (No tools executed)"
         
         # Phase 3C: Refined Insufficiency Detection
         # Only replan if RAG was attempted, yielded successful results, but zero external facts.

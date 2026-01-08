@@ -45,10 +45,10 @@ service ClientExecutor {
   rpc RequestConfirmation (ConfirmationRequest) returns (ConfirmationResponse);
 }
 
-// --- GLOBAL HEALTH SERVICE (Ops) ---
+// --- GLOBAL HEALTH SERVICE (Shared across VMs) ---
 service HealthService {
   rpc Check (HealthCheckRequest) returns (HealthCheckResponse);
-  rpc Watch (HealthCheckRequest) returns (stream HealthCheckResponse);
+  rpc Watch (HealthCheckRequest) returns (stream ClusterHealth);
 }
 
 // --- OPS SERVICE (VM 4) ---
@@ -82,7 +82,7 @@ message ActionIntent {
   google.protobuf.Struct params = 2;
   bool requires_confirmation = 3;
   repeated string depends_on = 4; // IDs of steps that must complete first
-  string condition = 5;          // Optional: Boolean expression for activation
+  optional string condition = 5;          // Optional: Boolean expression for activation
 }
 
 message PlannerStep {
@@ -163,6 +163,48 @@ message HealthCheckRequest {
   string service = 1;
 }
 
+message NodeMetrics {
+  float cpu_percent = 1;
+  float mem_percent = 2;
+  uint64 rss_bytes = 3;
+  uint64 uptime_sec = 4;
+}
+
+message NodeHealth {
+  string node_name = 1;
+  HealthCheckResponse.ServingStatus status = 2;
+  NodeMetrics metrics = 3;
+  uint64 last_seen_unix = 4;
+}
+
+message ClusterHealth {
+  repeated NodeHealth nodes = 1;
+}
+
+message ExecutionResult {
+  string step_id = 1;
+  string tool_id = 2;
+
+  enum Status {
+    EXECUTED = 0;
+    SKIPPED = 1;
+    DENIED = 2;
+    FAILED = 3;
+    AWAITING_CONFIRMATION = 4;
+  }
+
+  Status status = 3;
+  string raw_output = 4;
+  string error = 5;
+  string decision_reason = 6;
+}
+
+message ResultPacket {
+  string user_query = 1;
+  repeated ExecutionResult results = 2;
+  map<string, string> context = 3;
+}
+
 message HealthCheckResponse {
   enum ServingStatus {
     UNKNOWN = 0;
@@ -170,5 +212,6 @@ message HealthCheckResponse {
     NOT_SERVING = 2;
   }
   ServingStatus status = 1;
-  map<string, float> metrics = 2; // latency, cpu, ram
+  map<string, float> metrics = 2; // legacy field for migration
+  NodeMetrics node_metrics = 3;   // structured metrics
 }

@@ -1,33 +1,34 @@
-from common.utils.tool_registry import get_tool_prompt
+from common.utils.tool_registry import TOOL_REGISTRY
+
+# Survival escaping for .format()
+_IDS = ", ".join(TOOL_REGISTRY.keys())
 
 SYSTEM_PLANNER_PROMPT = f"""
 [IDENTITY]
-You are the Executive Planner for KURO. Your goal is to convert a user message into a Directed Acyclic Graph (DAG) of actionable steps.
+You are KURO Planner. Generate a JSON DAG.
 
-{{get_tool_prompt()}}
+[TOOLS]
+{_IDS}
 
-[CONSTRAINTS]
-- MAX_NODES: 6
-- MAX_DEPTH: 4
-- Output ONLY a raw JSON object. Do not include markdown code blocks or conversational text.
-- Do NOT invent tools. Only use IDs from the registry above.
-- Ensure dependency IDs match existing step_ids.
-- In 'params', use exact keys required by the tool.
-
-[SCHEMA]
-{{
-  "goal": "Brief description of intent",
-  "steps": [
-    {{
-      "step_id": "STEP_01",
-      "action_id": "TOOL_NAME",
-      "description": "Why we are doing this",
-      "params": {{ "key": "value" }},
-      "depends_on": []
-    }}
-  ]
-}}
+[STRICT RULES]
+1. Use ONLY these IDs.
+2. Output ONLY the JSON.
+3. Every key must have "double quotes".
 
 [USER MESSAGE]
 "{{user_text}}"
+
+[JSON OUTPUT]
+{{{{
+  "goal": "...",
+  "steps": [
+    {{{{
+      "step_id": "STEP_1",
+      "action_id": "...",
+      "description": "...",
+      "params": {{{{}}}},
+      "depends_on": []
+    }}}}
+  ]
+}}}}
 """

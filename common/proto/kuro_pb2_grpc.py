@@ -462,7 +462,7 @@ class ClientExecutor(object):
 
 
 class HealthServiceStub(object):
-    """--- GLOBAL HEALTH SERVICE (Ops) ---
+    """--- GLOBAL HEALTH SERVICE (Shared across VMs) ---
     """
 
     def __init__(self, channel):
@@ -479,12 +479,12 @@ class HealthServiceStub(object):
         self.Watch = channel.unary_stream(
                 '/kuro.HealthService/Watch',
                 request_serializer=common_dot_proto_dot_kuro__pb2.HealthCheckRequest.SerializeToString,
-                response_deserializer=common_dot_proto_dot_kuro__pb2.HealthCheckResponse.FromString,
+                response_deserializer=common_dot_proto_dot_kuro__pb2.ClusterHealth.FromString,
                 _registered_method=True)
 
 
 class HealthServiceServicer(object):
-    """--- GLOBAL HEALTH SERVICE (Ops) ---
+    """--- GLOBAL HEALTH SERVICE (Shared across VMs) ---
     """
 
     def Check(self, request, context):
@@ -510,7 +510,7 @@ def add_HealthServiceServicer_to_server(servicer, server):
             'Watch': grpc.unary_stream_rpc_method_handler(
                     servicer.Watch,
                     request_deserializer=common_dot_proto_dot_kuro__pb2.HealthCheckRequest.FromString,
-                    response_serializer=common_dot_proto_dot_kuro__pb2.HealthCheckResponse.SerializeToString,
+                    response_serializer=common_dot_proto_dot_kuro__pb2.ClusterHealth.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -521,7 +521,7 @@ def add_HealthServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class HealthService(object):
-    """--- GLOBAL HEALTH SERVICE (Ops) ---
+    """--- GLOBAL HEALTH SERVICE (Shared across VMs) ---
     """
 
     @staticmethod
@@ -567,7 +567,7 @@ class HealthService(object):
             target,
             '/kuro.HealthService/Watch',
             common_dot_proto_dot_kuro__pb2.HealthCheckRequest.SerializeToString,
-            common_dot_proto_dot_kuro__pb2.HealthCheckResponse.FromString,
+            common_dot_proto_dot_kuro__pb2.ClusterHealth.FromString,
             options,
             channel_credentials,
             insecure,

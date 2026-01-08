@@ -1,96 +1,114 @@
-import grpc
 import os
 import sys
 sys.path.append(os.getcwd())
+sys.stdout.reconfigure(line_buffering=True)
+import logging
 import time
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("Brain")
+
 from concurrent import futures
-from brain.router.router import IntentRouter
-from brain.planner.planner import TaskPlanner
-from brain.analyst.summarizer import SemanticAnalyst
-from brain.memory_admission.admission_controller import MemoryAdmissionController
-from brain.persona.generator import PersonaGenerator
-from common.utils.health import HealthServicer
+import grpc
+
 from common.proto import kuro_pb2
 from common.proto import kuro_pb2_grpc
+from common.utils.health import HealthServicer
+from brain.router.router import IntentRouter
+from brain.planner.planner import TaskPlanner
+from brain.planner.executor import DAGExecutor
+from brain.arbiter.arbiter import DecisionArbiter
+from brain.persona.generator import PersonaGenerator
 
 class BrainOrchestrator(kuro_pb2_grpc.BrainServiceServicer):
     """
-    The central coordinator for VM 1 (The Brain).
-    Implements the 5-layer reasoning flow.
+    Main Brain Orchestrator (VM1).
+    Implements the 5-layer cognition pipeline with One-Way Valve hardening.
     """
-    def __init__(self):
+    def __init__(self, memory_stub, rag_stub, client_stub, ops_stub):
+        self.memory_stub = memory_stub
+        self.rag_stub = rag_stub
+        self.client_stub = client_stub
+        self.ops_stub = ops_stub
+        
+        # Initialize Cognition Layers
         self.router = IntentRouter()
-        self.analyst = SemanticAnalyst()
-        self.admission = MemoryAdmissionController()
+        self.planner = TaskPlanner(ollama_url="http://127.0.0.1:11434/api/generate")
+        self.arbiter = DecisionArbiter(memory_stub)
+        self.executor = DAGExecutor(memory_stub, rag_stub, client_stub, ops_stub)
         self.persona = PersonaGenerator()
-        
-        # Initialize stubs for external VMs (In reality, these would be cloud IPs)
-        self.memory_channel = grpc.insecure_channel('localhost:50053')
-        self.rag_channel = grpc.insecure_channel('localhost:50052')
-        self.client_channel = grpc.insecure_channel('localhost:50054')
-        self.ops_channel = grpc.insecure_channel('localhost:50055')
-        
-        self.memory_stub = kuro_pb2_grpc.MemoryServiceStub(self.memory_channel)
-        self.rag_stub = kuro_pb2_grpc.RagServiceStub(self.rag_channel)
-        self.client_stub = kuro_pb2_grpc.ClientExecutorStub(self.client_channel)
-        self.ops_stub = kuro_pb2_grpc.OpsServiceStub(self.ops_channel)
-        
-        self.planner = TaskPlanner(self.memory_stub, self.rag_stub, self.client_stub, self.ops_stub)
 
     def ChatStream(self, request_iterator, context):
-        for user_msg in request_iterator:
-            print(f"Received message: {user_msg.text}")
+        for request in request_iterator:
+            logger.info(f"Processing message: {request.text[:50]}...")
             
-            # Layer 1: Intent Routing
-            intent = self.router.route(user_msg.text)
+            # 1. Intent Routing (Mechanical)
+            intent = self.router.route(request.text)
+            logger.info(f"Intent classified: {intent}")
+
+            # 2. Get Context (Memory/RAG) pour persona and arbiter
+            memory_context = self.memory_stub.GetContext(kuro_pb2.ContextRequest(
+                session_id=request.session_id,
+                entities=[] # Entity extraction could be L1b
+            ))
+
+            # 3. Planning (LLM-Strict)
+            # Planner generates a DAG. For CONVERSE intents, it returns an empty DAG.
+            dag = self.planner.execute_plan(intent, request.text)
             
-            # Phase 3C: Iterative Reasoning Loop
-            all_results = []
-            max_iterations = 3
-            current_iteration = 0
+            # 4. Arbitration (Mechanical Policy)
+            # Decisions are ALLOW, DENY, CONFIRM
+            arbiter_decisions = self.arbiter.evaluate_plan(dag)
             
-            feedback = None
-            while current_iteration < max_iterations:
-                print(f"Executing reasoning step {current_iteration + 1} for intent: {intent}")
-                plan_results = self.planner.execute_plan(intent, user_msg, feedback=feedback)
-                all_results.extend(plan_results)
-                
-                # Layer 4: Semantic Analysis
-                analysis, needs_more_data = self.analyst.synthesize(all_results)
-                
-                if not needs_more_data:
-                    break
-                
-                feedback = "Initial search returned no high-confidence results."
-                print(f"Analyst detected gaps ({feedback}). Re-planning...")
-                current_iteration += 1
-                # Optional: Feed back the gaps to the planner in future updates
+            # 5. Execution (Mechanical Tools)
+            # Returns a list of standardized ExecutionResult protos
+            execution_results = self.executor.execute(dag, arbiter_decisions)
             
-            # Layer 4.5: Memory Admission (Decide what to save in VM 3)
-            proposals = self.admission.evaluate(user_msg, analysis)
-            for prop in proposals:
-                self.memory_stub.ProposeMemory(prop)
-                
-            # Layer 5: Persona Generation
-            # Audit Fix: Explicitly search for memory context to avoid indexing bugs
-            memory_ctx = next(
-                (r["data"] for r in all_results if r.get("type") == "memory"),
-                kuro_pb2.ContextResponse()
+            # 6. Construct ResultPacket (Standardized Contract)
+            # This is the "One-Way Valve". Narration ONLY sees this packet.
+            packet = kuro_pb2.ResultPacket(
+                user_query=request.text,
+                results=execution_results,
+                context={"mode": request.context.mode, "location": request.context.location}
             )
             
-            final_text = self.persona.generate(analysis, memory_ctx, user_msg)
+            # 7. Narration (Persona LLM)
+            # Persona narrates the packet outcomes.
+            narration = self.persona.generate(packet, memory_context)
             
+            # Stream the response
             yield kuro_pb2.BrainResponse(
-                text=final_text,
+                text=narration,
                 is_partial=False
             )
 
 def serve():
+    # 1. Connect to Dependencies
+    # (Using loopback or tailscale IPs depending on env)
+    memory_channel = grpc.insecure_channel('localhost:50053')
+    rag_channel = grpc.insecure_channel('localhost:50052')
+    client_channel = grpc.insecure_channel('localhost:50054')
+    ops_channel = grpc.insecure_channel('localhost:50055')
+
+    # 2. Start gRPC Server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    kuro_pb2_grpc.add_BrainServiceServicer_to_server(BrainOrchestrator(), server)
+    
+    brain_orchestrator = BrainOrchestrator(
+        kuro_pb2_grpc.MemoryServiceStub(memory_channel),
+        kuro_pb2_grpc.RagServiceStub(rag_channel),
+        kuro_pb2_grpc.ClientExecutorStub(client_channel),
+        kuro_pb2_grpc.OpsServiceStub(ops_channel)
+    )
+    
+    kuro_pb2_grpc.add_BrainServiceServicer_to_server(brain_orchestrator, server)
     kuro_pb2_grpc.add_HealthServiceServicer_to_server(HealthServicer("Brain"), server)
-    server.add_insecure_port('[::]:50051')
-    print("Brain Orchestrator (VM 1) starting on port 50051...")
+    
+    # Explicit IPv4 binding
+    server.add_insecure_port('0.0.0.0:50051')
+    logger.info("KURO Brain (VM 1) starting on port 50051...")
     server.start()
     server.wait_for_termination()
 
