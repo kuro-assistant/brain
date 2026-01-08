@@ -31,7 +31,13 @@ class TaskPlanner:
                     "stop": ["\n\n", "```"]
                 }
             })
-            raw_content = response.json()["response"]
+            response.raise_for_status()
+            payload = response.json()
+            
+            if "response" not in payload:
+                raise ValueError("Ollama response missing 'response' field")
+
+            raw_content = payload["response"]
             
             # Audit Fix: Harden JSON extraction (Find first '{')
             raw = raw_content.strip()

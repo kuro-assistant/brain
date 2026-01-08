@@ -85,8 +85,10 @@ class DAGExecutor:
 
     def _evaluate_condition(self, condition_str, context):
         # Audit Fix: Fail closed. Defaults to False if sid not in context.
+        # Use token-based matching to avoid substring collision (STEP_1 vs STEP_10)
         for sid, result in context.items():
-            if sid in condition_str:
+            token = f"{sid}."
+            if token in condition_str:
                 return result.get("success", False)
         return False
 

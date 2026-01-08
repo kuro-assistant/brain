@@ -69,7 +69,13 @@ class BrainOrchestrator(kuro_pb2_grpc.BrainServiceServicer):
                 self.memory_stub.ProposeMemory(prop)
                 
             # Layer 5: Persona Generation
-            final_text = self.persona.generate(analysis, all_results[1]["data"] if len(all_results) > 1 else kuro_pb2.ContextResponse(), user_msg)
+            # Audit Fix: Explicitly search for memory context to avoid indexing bugs
+            memory_ctx = next(
+                (r["data"] for r in all_results if r.get("type") == "memory"),
+                kuro_pb2.ContextResponse()
+            )
+            
+            final_text = self.persona.generate(analysis, memory_ctx, user_msg)
             
             yield kuro_pb2.BrainResponse(
                 text=final_text,

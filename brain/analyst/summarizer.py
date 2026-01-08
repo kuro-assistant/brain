@@ -49,15 +49,19 @@ class SemanticAnalyst:
             analysis.append("\n### SYSTEM EXECUTION")
             analysis.extend(system_status)
             
+        analysis_str = "\n".join(analysis) if analysis else "No significant context found."
+        
         # Phase 3C: Refined Insufficiency Detection
         # Only replan if RAG was attempted, yielded successful results, but zero external facts.
         needs_more_data = False
         rag_attempted = any(r["type"] == "rag" for r in plan_results)
         
         if rag_attempted and not external_facts:
-            # We explicitly check for 'success' flag in the tool results
-            # If RAG failed, it's a repair issue, not an 'insufficiency' issue.
-            rag_succeeded = any(r["type"] == "rag" and r.get("success", False) for r in plan_results)
+            # Audit Fix: Harden success check to be 'is True' (fail closed on None)
+            rag_succeeded = any(
+                r["type"] == "rag" and r.get("success") is True 
+                for r in plan_results
+            )
             if rag_succeeded:
                 needs_more_data = True
             
