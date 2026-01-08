@@ -1,17 +1,11 @@
-import grpc
 import time
-from common.proto import kuro_pb2
-from common.proto import kuro_pb2_grpc
-from google.protobuf import struct_pb2
-import requests
-import json
-from brain.planner.validator import DAGValidator
-from brain.planner.prompts import SYSTEM_PLANNER_PROMPT
 from collections import deque
+from common.proto import kuro_pb2
 
 class DAGExecutor:
     """
     Executes a PlannerDAG in topological order with failure handling.
+    One result per step. Fail-closed condition evaluation.
     """
     def __init__(self, memory_stub, rag_stub, client_stub, ops_stub):
         self.stubs = {
@@ -20,13 +14,12 @@ class DAGExecutor:
             "client": client_stub,
             "ops": ops_stub
         }
-        self.retry_budget = 2 # 3A.2: Retry budget per node
+        self.retry_budget = 2
 
     def execute(self, dag: kuro_pb2.PlannerDAG) -> list:
         results = []
         completed_steps = {} # step_id -> result
         
-        # Build dependency graph
         adj = {step.step_id: [] for step in dag.steps}
         steps_map = {step.step_id: step for step in dag.steps}
         in_degree = {step.step_id: 0 for step in dag.steps}
@@ -37,75 +30,73 @@ class DAGExecutor:
                     adj[dep].append(step.step_id)
                     in_degree[step.step_id] += 1
         
-        # Topological Sort Execution (Kahn's Algorithm variant)
         queue = deque([sid for sid in in_degree if in_degree[sid] == 0])
         
         while queue:
             current_id = queue.popleft()
             step = steps_map[current_id]
             
-            # 3C: Check for conditional execution
+            # 3C: Check for conditional execution (Fail Closed)
             if step.intent.HasField("condition"):
-                # Basic condition evaluation (e.g., "results.STEP_01.success == True")
-                # For this implementation, we check if the required context key exists and is truthy
                 cond = step.intent.condition
                 if not self._evaluate_condition(cond, completed_steps):
-                    print(f"Planner: Skipping step '{current_id}' based on condition: {cond}")
+                    print(f"Planner: Skipping step '{current_id}' (Condition False: {cond})")
                     completed_steps[current_id] = {"success": True, "skipped": True}
+                    # Advance neighbors even on skip
                     for neighbor in adj[current_id]:
                         in_degree[neighbor] -= 1
                         if in_degree[neighbor] == 0:
                             queue.append(neighbor)
                     continue
 
-            # Execute step with retries (3A.2)
+            # Execute step with retries
             attempts = 0
             success = False
+            last_result = None
             while attempts <= self.retry_budget and not success:
-                result = self._dispatch_step(step, completed_steps)
-                if result.get("success", False):
+                last_result = self._dispatch_step(step, completed_steps)
+                if last_result.get("success", False):
                     success = True
                 else:
                     attempts += 1
                     print(f"Planner: Step '{current_id}' failed (Attempt {attempts}).")
 
-            completed_steps[current_id] = result
-            results.append(result)
-            
             if success:
+                completed_steps[current_id] = last_result
+                results.append(last_result)
                 for neighbor in adj[current_id]:
                     in_degree[neighbor] -= 1
                     if in_degree[neighbor] == 0:
                         queue.append(neighbor)
             else:
-                print(f"Planner: Step '{current_id}' reached retry limit. Initiating local repair...")
-                # 3A.2: Plan Repair hook
-                results.append({"type": "error", "id": current_id, "data": "Step failed after retries. Manual intervention or 'repair' required."})
+                # 3A.2/Audit Fix: Single error entry per failure
+                print(f"Planner: Step '{current_id}' failed after {attempts} retries.")
+                error_result = {
+                    "type": "error", 
+                    "id": current_id, 
+                    "success": False,
+                    "data": f"Step reached retry limit. Manual check required."
+                }
+                completed_steps[current_id] = error_result
+                results.append(error_result)
                 break
                 
         return results
 
     def _evaluate_condition(self, condition_str, context):
-        """
-        Evaluates a simple boolean condition based on previous step results.
-        Example: 'STEP_01.success'
-        """
-        for sid in context:
+        # Audit Fix: Fail closed. Defaults to False if sid not in context.
+        for sid, result in context.items():
             if sid in condition_str:
-                return context[sid].get("success", False)
-        return True
+                return result.get("success", False)
+        return False
 
     def _dispatch_step(self, step: kuro_pb2.PlannerStep, context_data: dict):
-        """
-        Routes the tool call to the appropriate VM stub with error handling.
-        """
         action_id = step.intent.action_id
         start_time = time.time()
-        timeout = 5.0 # Formalizing 5s timeout per Phase 2B
+        timeout = 5.0
         
         try:
             if action_id == "RAG_SEARCH":
-                # Data from previous steps could be used via context_data
                 res = self.stubs["rag"].SearchKnowledge(kuro_pb2.SearchRequest(query=step.description, top_k=3))
                 return {"type": "rag", "success": True, "data": res}
             elif action_id == "MEMORY_GET":
@@ -131,74 +122,3 @@ class DAGExecutor:
             latency = (time.time() - start_time) * 1000
             if latency > timeout * 1000:
                 print(f"WARNING: Step {step.step_id} timed out ({latency:.2f}ms)")
-
-class TaskPlanner:
-    def __init__(self, memory_stub, rag_stub, client_stub, ops_stub):
-        self.executor = DAGExecutor(memory_stub, rag_stub, client_stub, ops_stub)
-        self.validator = DAGValidator()
-        self.llm_url = "http://localhost:11434/api/generate"
-        self.model = "phi3"
-
-    def execute_plan(self, intent, user_msg, feedback=None):
-        # 3A.1/3C: Adaptive Planning (LLM-driven)
-        context_str = f"\n[SUPPLEMENTARY CONTEXT]\nPrevious attempts were insufficient: {feedback}" if feedback else ""
-        prompt = SYSTEM_PLANNER_PROMPT.format(user_text=user_msg.text) + context_str
-        
-        try:
-            # Call Ollama API
-            response = requests.post(self.llm_url, json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                    "stop": ["\n\n", "```"]
-                }
-            })
-            raw_content = response.json()["response"]
-            plan_json = json.loads(raw_content)
-            
-            # Map JSON to Protobuf DAG
-            dag = kuro_pb2.PlannerDAG(goal=plan_json.get("goal", "Resolved"))
-            for s in plan_json.get("steps", []):
-                step = dag.steps.add()
-                step.step_id = s["step_id"]
-                step.description = s["description"]
-                intent_msg = kuro_pb2.ActionIntent(
-                    action_id=s["action_id"],
-                    depends_on=s.get("depends_on", [])
-                )
-                if "params" in s:
-                    for k, v in s["params"].items():
-                        intent_msg.params[k] = v
-                step.intent.CopyFrom(intent_msg)
-            
-            # 3A.1: Safe Mode Validation
-            is_valid, error = self.validator.validate(dag)
-            if not is_valid:
-                print(f"Planner: Proposed DAG rejected: {error}")
-                return [{"type": "error", "data": f"Safety Violation: {error}"}]
-                
-            return self.executor.execute(dag)
-            
-        except Exception as e:
-            print(f"Planner: Adaptive generation failed ({str(e)}). Falling back to static plan.")
-            return self._fallback_plan(intent, user_msg)
-
-    def _fallback_plan(self, intent, user_msg):
-        """
-        Phase 2B logic preserved as fallback.
-        """
-        dag = kuro_pb2.PlannerDAG(goal=f"Fallback {intent}")
-        if intent == kuro_pb2.REALTIME_SEARCH:
-            dag.steps.add(
-                step_id="FALLBACK_01",
-                description="Memory fetch (Fallback)",
-                intent=kuro_pb2.ActionIntent(action_id="MEMORY_GET")
-            )
-            dag.steps.add(
-                step_id="FALLBACK_02",
-                description=f"Knowledge search for: {user_msg.text}",
-                intent=kuro_pb2.ActionIntent(action_id="RAG_SEARCH", depends_on=["FALLBACK_01"])
-            )
-        return self.executor.execute(dag)

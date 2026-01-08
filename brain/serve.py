@@ -2,7 +2,7 @@ import grpc
 import time
 from concurrent import futures
 from brain.router.router import IntentRouter
-from brain.planner.executor import TaskPlanner
+from brain.planner.planner import TaskPlanner
 from brain.analyst.summarizer import SemanticAnalyst
 from brain.memory_admission.admission_controller import MemoryAdmissionController
 from brain.persona.generator import PersonaGenerator
