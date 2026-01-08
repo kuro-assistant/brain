@@ -3,6 +3,10 @@ import time
 from common.proto import kuro_pb2
 from common.proto import kuro_pb2_grpc
 from google.protobuf import struct_pb2
+import requests
+import json
+from brain.planner.validator import DAGValidator
+from brain.planner.prompts import SYSTEM_PLANNER_PROMPT
 from collections import deque
 
 class DAGExecutor:
@@ -15,6 +19,7 @@ class DAGExecutor:
             "rag": rag_stub,
             "client": client_stub
         }
+        self.retry_budget = 2 # 3A.2: Retry budget per node
 
     def execute(self, dag: kuro_pb2.PlannerDAG) -> list:
         results = []
@@ -40,20 +45,30 @@ class DAGExecutor:
             
             print(f"Planner: Executing step '{current_id}' - {step.description}")
             
-            # Execute step based on action_id prefix or mapping
-            # (In Phase 2B, we assume a mapping between action_id and stub method)
-            result = self._dispatch_step(step, completed_steps)
+            # Execute step with retries (3A.2)
+            attempts = 0
+            success = False
+            while attempts <= self.retry_budget and not success:
+                result = self._dispatch_step(step, completed_steps)
+                if result.get("success", False):
+                    success = True
+                else:
+                    attempts += 1
+                    print(f"Planner: Step '{current_id}' failed (Attempt {attempts}).")
+
             completed_steps[current_id] = result
             results.append(result)
             
-            if result.get("success", True):
+            if success:
                 for neighbor in adj[current_id]:
                     in_degree[neighbor] -= 1
                     if in_degree[neighbor] == 0:
                         queue.append(neighbor)
             else:
-                print(f"Planner: Step '{current_id}' failed. Halting branch.")
-                # Future: Implement branch-specific failure logic here
+                print(f"Planner: Step '{current_id}' reached retry limit. Initiating local repair...")
+                # 3A.2: Plan Repair hook
+                results.append({"type": "error", "id": current_id, "data": "Step failed after retries. Manual intervention or 'repair' required."})
+                break
                 
         return results
 
@@ -89,43 +104,67 @@ class DAGExecutor:
                 print(f"WARNING: Step {step.step_id} timed out ({latency:.2f}ms)")
 
 class TaskPlanner:
-    """
-    Layer 2: The Executive Planner.
-    Now utilizes DAGExecutor for complex multi-step orchestration.
-    """
     def __init__(self, memory_stub, rag_stub, client_stub):
         self.executor = DAGExecutor(memory_stub, rag_stub, client_stub)
-        self.memory_stub = memory_stub
-        self.rag_stub = rag_stub
+        self.validator = DAGValidator()
+        self.llama_url = "http://localhost:8080/completion"
 
     def execute_plan(self, intent, user_msg):
-        """
-        Converts Intent Enums into high-level PlannerDAGs.
-        """
-        dag = kuro_pb2.PlannerDAG(goal=f"Resolve {intent}")
+        # 3A.1: Adaptive Planning (LLM-driven)
+        prompt = SYSTEM_PLANNER_PROMPT.format(user_text=user_msg.text)
         
+        try:
+            # Call llama.cpp API
+            response = requests.post(self.llama_url, json={
+                "prompt": prompt,
+                "n_predict": 512,
+                "temperature": 0.2,
+                "stop": ["\n\n"]
+            })
+            raw_content = response.json()["content"]
+            plan_json = json.loads(raw_content)
+            
+            # Map JSON to Protobuf DAG
+            dag = kuro_pb2.PlannerDAG(goal=plan_json.get("goal", "Resolved"))
+            for s in plan_json.get("steps", []):
+                step = dag.steps.add()
+                step.step_id = s["step_id"]
+                step.description = s["description"]
+                intent_msg = kuro_pb2.ActionIntent(
+                    action_id=s["action_id"],
+                    depends_on=s.get("depends_on", [])
+                )
+                if "params" in s:
+                    for k, v in s["params"].items():
+                        intent_msg.params[k] = v
+                step.intent.CopyFrom(intent_msg)
+            
+            # 3A.1: Safe Mode Validation
+            is_valid, error = self.validator.validate(dag)
+            if not is_valid:
+                print(f"Planner: Proposed DAG rejected: {error}")
+                return [{"type": "error", "data": f"Safety Violation: {error}"}]
+                
+            return self.executor.execute(dag)
+            
+        except Exception as e:
+            print(f"Planner: Adaptive generation failed ({str(e)}). Falling back to static plan.")
+            return self._fallback_plan(intent, user_msg)
+
+    def _fallback_plan(self, intent, user_msg):
+        """
+        Phase 2B logic preserved as fallback.
+        """
+        dag = kuro_pb2.PlannerDAG(goal=f"Fallback {intent}")
         if intent == kuro_pb2.REALTIME_SEARCH:
-            # 1. Identity Fetch
             dag.steps.add(
-                step_id="STEP_01",
-                description="Retrieve user memory and preferences",
+                step_id="FALLBACK_01",
+                description="Memory fetch (Fallback)",
                 intent=kuro_pb2.ActionIntent(action_id="MEMORY_GET")
             )
-            # 2. Knowledge Search (Depends on 1 for context, though simple for now)
             dag.steps.add(
-                step_id="STEP_02",
-                description=user_msg.text,
-                intent=kuro_pb2.ActionIntent(
-                    action_id="RAG_SEARCH",
-                    depends_on=["STEP_01"]
-                )
+                step_id="FALLBACK_02",
+                description=f"Knowledge search for: {user_msg.text}",
+                intent=kuro_pb2.ActionIntent(action_id="RAG_SEARCH", depends_on=["FALLBACK_01"])
             )
-            
-        elif intent == kuro_pb2.TOOL_ACTION:
-            dag.steps.add(
-                step_id="STEP_01",
-                description=f"Action: {user_msg.text}",
-                intent=kuro_pb2.ActionIntent(action_id="FS_EXEC")
-            )
-
         return self.executor.execute(dag)
