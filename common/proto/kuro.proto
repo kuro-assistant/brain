@@ -38,6 +38,12 @@ service ClientExecutor {
   rpc RequestConfirmation (ConfirmationRequest) returns (ConfirmationResponse);
 }
 
+// --- GLOBAL HEALTH SERVICE (Ops) ---
+service HealthService {
+  rpc Check (HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Watch (HealthCheckRequest) returns (stream HealthCheckResponse);
+}
+
 // --- DATA STRUCTURES ---
 
 message UserMessage {
@@ -138,4 +144,18 @@ message ConfirmationResponse {
 message PreferenceUpdate {
   string key = 1;
   float value = 2;
+}
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+  map<string, float> metrics = 2; // latency, cpu, ram
 }

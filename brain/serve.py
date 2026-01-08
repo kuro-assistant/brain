@@ -6,6 +6,7 @@ from brain.planner.executor import TaskPlanner
 from brain.analyst.summarizer import SemanticAnalyst
 from brain.memory_admission.admission_controller import MemoryAdmissionController
 from brain.persona.generator import PersonaGenerator
+from common.utils.health import HealthServicer
 from common.proto import kuro_pb2
 from common.proto import kuro_pb2_grpc
 
@@ -61,8 +62,9 @@ class BrainOrchestrator(kuro_pb2_grpc.BrainServiceServicer):
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     kuro_pb2_grpc.add_BrainServiceServicer_to_server(BrainOrchestrator(), server)
+    kuro_pb2_grpc.add_HealthServiceServicer_to_server(HealthServicer("Brain"), server)
     server.add_insecure_port('[::]:50051')
-    print("Brain Server starting on port 50051...")
+    print("Brain Orchestrator (VM 1) starting on port 50051...")
     server.start()
     server.wait_for_termination()
 
