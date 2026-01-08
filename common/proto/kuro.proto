@@ -44,6 +44,11 @@ service HealthService {
   rpc Watch (HealthCheckRequest) returns (stream HealthCheckResponse);
 }
 
+// --- OPS SERVICE (VM 4) ---
+service OpsService {
+  rpc ExecuteSystemAction (ActionRequest) returns (ActionResponse);
+}
+
 // --- DATA STRUCTURES ---
 
 message UserMessage {

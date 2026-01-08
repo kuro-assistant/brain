@@ -13,11 +13,12 @@ class DAGExecutor:
     """
     Executes a PlannerDAG in topological order with failure handling.
     """
-    def __init__(self, memory_stub, rag_stub, client_stub):
+    def __init__(self, memory_stub, rag_stub, client_stub, ops_stub):
         self.stubs = {
             "memory": memory_stub,
             "rag": rag_stub,
-            "client": client_stub
+            "client": client_stub,
+            "ops": ops_stub
         }
         self.retry_budget = 2 # 3A.2: Retry budget per node
 
@@ -116,6 +117,12 @@ class DAGExecutor:
                     params=step.intent.params
                 ))
                 return {"type": "tool", "success": res.success, "data": res}
+            elif action_id == "SYS_STAT":
+                res = self.stubs["ops"].ExecuteSystemAction(kuro_pb2.ActionRequest(
+                    action_id=action_id,
+                    params=step.intent.params
+                ))
+                return {"type": "tool", "success": res.success, "data": res}
             else:
                 return {"type": "error", "success": False, "data": f"Unknown action: {action_id}"}
         except Exception as e:
@@ -126,8 +133,8 @@ class DAGExecutor:
                 print(f"WARNING: Step {step.step_id} timed out ({latency:.2f}ms)")
 
 class TaskPlanner:
-    def __init__(self, memory_stub, rag_stub, client_stub):
-        self.executor = DAGExecutor(memory_stub, rag_stub, client_stub)
+    def __init__(self, memory_stub, rag_stub, client_stub, ops_stub):
+        self.executor = DAGExecutor(memory_stub, rag_stub, client_stub, ops_stub)
         self.validator = DAGValidator()
         self.llama_url = "http://localhost:8080/completion"
 
