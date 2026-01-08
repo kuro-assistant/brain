@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package kuro;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// --- CORE BRAIN SERVICE (VM 1) ---
+service BrainService {
+  // Stream natural language from client to brain
+  rpc ChatStream (stream UserMessage) returns (stream BrainResponse);
+}
+
+// --- MEMORY SERVICE (VM 3) ---
+service MemoryService {
+  // Retrieve relevant behavioral atoms and personality snapshot
+  rpc GetContext (ContextRequest) returns (ContextResponse);
+  
+  // Decides whether an interaction should be stored (VM 1 calls this)
+  rpc ProposeMemory (MemoryProposal) returns (MemoryStatus);
+  
+  // Updates specific preference weights
+  rpc UpdatePreference (PreferenceUpdate) returns (MemoryStatus);
+}
+
+// --- RAG SERVICE (VM 2) ---
+service RagService {
+  // Semantic search for knowledge
+  rpc SearchKnowledge (SearchRequest) returns (SearchResponse);
+}
+
+// --- CLIENT EXECUTOR SERVICE (Local Machine) ---
+service ClientExecutor {
+  // Execute a secure, ID-mapped action
+  rpc ExecuteAction (ActionRequest) returns (ActionResponse);
+  
+  // Request confirmation for destructive tasks
+  rpc RequestConfirmation (ConfirmationRequest) returns (ConfirmationResponse);
+}
+
+// --- DATA STRUCTURES ---
+
+message UserMessage {
+  string text = 1;
+  string session_id = 2;
+  Context context = 3;
+}
+
+message BrainResponse {
+  string text = 1;
+  ActionIntent action_intent = 2;
+  bool is_partial = 3;
+}
+
+message Context {
+  google.protobuf.Timestamp timestamp = 1;
+  string mode = 2; // work, night, away
+  string location = 3;
+  map<string, string> metadata = 4;
+}
+
+message ActionIntent {
+  string action_id = 1;
+  google.protobuf.Struct params = 2;
+  bool requires_confirmation = 3;
+}
+
+message MemoryProposal {
+  string entity_id = 1;
+  string dimension = 2;
+  float delta = 3;
+  string context_hash = 4;
+  float confidence = 5;
+}
+
+message MemoryStatus {
+  bool success = 1;
+  string message = 2;
+}
+
+message ContextRequest {
+  string session_id = 1;
+  repeated string entities = 2;
+}
+
+message ContextResponse {
+  repeated string memory_summaries = 1;
+  map<string, float> preferences = 2;
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 top_k = 2;
+}
+
+message SearchResponse {
+  repeated KnowledgeChunk chunks = 1;
+}
+
+message KnowledgeChunk {
+  string text = 1;
+  float score = 2;
+  string source = 3;
+}
+
+message ActionRequest {
+  string action_id = 1;
+  google.protobuf.Struct params = 2;
+}
+
+message ActionResponse {
+  bool success = 1;
+  string output = 2;
+  string error = 3;
+}
+
+message ConfirmationRequest {
+  string message = 1;
+  string severity = 2; // info, warning, danger
+}
+
+message ConfirmationResponse {
+  bool approved = 1;
+}
+
+message PreferenceUpdate {
+  string key = 1;
+  float value = 2;
+}
