@@ -1,4 +1,7 @@
 import grpc
+import os
+import sys
+sys.path.append(os.getcwd())
 import time
 from concurrent import futures
 from brain.router.router import IntentRouter

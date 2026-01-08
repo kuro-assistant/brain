@@ -5,6 +5,13 @@ package kuro;
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 
+enum IntentType {
+  CONVERSE = 0;
+  REALTIME_SEARCH = 1;
+  TOOL_ACTION = 2;
+  MEMORY_QUERY = 3;
+}
+
 // --- CORE BRAIN SERVICE (VM 1) ---
 service BrainService {
   // Stream natural language from client to brain
