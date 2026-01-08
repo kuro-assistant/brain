@@ -57,4 +57,8 @@ class MemoryAdmissionController:
                 confidence=0.7
             ))
 
+        # Audit: Final Confidence Clamping [0, 1]
+        for prop in proposals:
+            prop.confidence = max(0.0, min(prop.confidence, 1.0))
+
         return proposals

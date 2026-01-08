@@ -14,7 +14,7 @@ class TaskPlanner:
         self.executor = DAGExecutor(memory_stub, rag_stub, client_stub, ops_stub)
         self.validator = DAGValidator()
         self.llm_url = "http://localhost:11434/api/generate"
-        self.model = "phi3"
+        self.model = "phi3:3.8b"
 
     def execute_plan(self, intent, user_msg, feedback=None):
         context_str = f"\n[SUPPLEMENTARY CONTEXT]\nPrevious attempts were insufficient: {feedback}" if feedback else ""

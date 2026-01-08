@@ -63,25 +63,23 @@ class DAGExecutor:
 
             if success:
                 completed_steps[current_id] = last_result
-                results.append(last_result)
                 for neighbor in adj[current_id]:
                     in_degree[neighbor] -= 1
                     if in_degree[neighbor] == 0:
                         queue.append(neighbor)
             else:
-                # 3A.2/Audit Fix: Single error entry per failure
+                # 3A.2/Audit Fix: Exactly one result per step_id. Fail-closed error.
                 print(f"Planner: Step '{current_id}' failed after {attempts} retries.")
                 error_result = {
-                    "type": "error", 
                     "id": current_id, 
+                    "type": "error",
                     "success": False,
                     "data": f"Step reached retry limit. Manual check required."
                 }
                 completed_steps[current_id] = error_result
-                results.append(error_result)
                 break
                 
-        return results
+        return list(completed_steps.values())
 
     def _evaluate_condition(self, condition_str, context):
         # Audit Fix: Fail closed. Defaults to False if sid not in context.

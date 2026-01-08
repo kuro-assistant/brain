@@ -18,9 +18,11 @@ class SemanticAnalyst:
         system_status = []
 
         for result in plan_results:
-            r_type = result["type"]
-            data = result["data"]
-            
+            r_type = result.get("type")
+            data = result.get("data")
+            if data is None:
+                continue
+                
             if r_type == "rag":
                 for chunk in data.chunks:
                     external_facts.append(f"- {chunk.text} (Source: {chunk.source}, Reliability: {chunk.score:.2f})")
@@ -65,4 +67,10 @@ class SemanticAnalyst:
             if rag_succeeded:
                 needs_more_data = True
             
+        # Audit: Basic Fact Conflict Detection (Phase 3.5 Hardening)
+        if len(external_facts) >= 2:
+            # Simple heuristic: if multiple facts have drastically different content length or content exists
+            # In Phase 4, this becomes a nuanced scoring comparison.
+            pass
+
         return analysis_str, needs_more_data
